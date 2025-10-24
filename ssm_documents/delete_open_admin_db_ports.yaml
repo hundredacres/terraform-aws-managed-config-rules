@@ -1,0 +1,82 @@
+schemaVersion: '2.2'
+description: 'Delete security group rules with 0.0.0.0/0 for admin or database ports'
+parameters:
+  SecurityGroupId:
+    type: String
+    description: 'The ID of the security group'
+  SNSTopicArn:
+    type: String
+    description: 'ARN of the SNS Topic'
+    default: ''
+mainSteps:
+  - name: GetSecurityGroupRules
+    action: 'aws:executeAwsApi'
+    inputs:
+      Service: ec2
+      Api: DescribeSecurityGroups
+      GroupIds:
+        - '{{ SecurityGroupId }}'
+    outputs:
+      - Name: SecurityGroupRules
+        Selector: '$.SecurityGroups[0].IpPermissions'
+        Type: StringMap
+  - name: DeleteOpenRules
+    action: 'aws:executeScript'
+    inputs:
+      Runtime: python3.11
+      Handler: delete_open_rules
+      Script: |
+        import boto3
+        def delete_open_rules(events, context):
+          ec2 = boto3.client('ec2')
+          sg_id = events['SecurityGroupId']
+          rules = events['SecurityGroupRules']
+          admin_db_ports = [22, 3389, 1433, 3306, 5432]
+          for rule in rules:
+            from_port = rule.get('FromPort')
+            to_port = rule.get('ToPort')
+            if from_port is None or to_port is None:
+              continue
+            for ip_range in rule.get('IpRanges', []):
+              if ip_range.get('CidrIp') == '0.0.0.0/0' and any(port in range(from_port, to_port + 1) for port in admin_db_ports):
+                ec2.revoke_security_group_ingress(
+                  GroupId=sg_id,
+                  IpPermissions=[{
+                    'IpProtocol': rule['IpProtocol'],
+                    'FromPort': from_port,
+                    'ToPort': to_port,
+                    'IpRanges': [{'CidrIp': '0.0.0.0/0'}]
+                  }]
+                )
+          return {'DeletedRules': 'Completed'}
+    inputs:
+      SecurityGroupId: '{{ SecurityGroupId }}'
+      SecurityGroupRules: '{{ GetSecurityGroupRules.SecurityGroupRules }}'
+
+  - name: CheckSNSTopicArn
+    action: aws:branch
+    inputs:
+      Choices:
+      - NextStep: PublishSNS
+        Variable: '{{ SNSTopicArn }}'
+        StringNotEquals: ''
+      Default: SkipSNS
+
+  - name: PublishSNS
+    action: aws:executeAwsApi
+    inputs:
+      Service: sns
+      Api: Publish
+      TopicArn: '{{ SNSTopicArn }}'
+      Message: 'Open admin/DB port rules have been deleted for security group: {{ SecurityGroupId }}'
+    isEnd: true
+
+  - name: SkipSNS
+    action: aws:executeScript
+    inputs:
+      Runtime: python3.11
+      Handler: script_handler
+      Script: |
+        def script_handler(events, context):
+          print("SNSTopicArn is empty, skipping SNS publication")
+    isEnd: true

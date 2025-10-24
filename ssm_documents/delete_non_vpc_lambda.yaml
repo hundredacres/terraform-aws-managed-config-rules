@@ -1,0 +1,45 @@
+schemaVersion: '2.2'
+description: 'Delete Lambda function not associated with a VPC'
+parameters:
+  FunctionName:
+    type: String
+    description: 'The name or ARN of the Lambda function to delete'
+  SNSTopicArn:
+    type: String
+    description: 'ARN of the SNS Topic'
+    default: ''
+mainSteps:
+  - name: DeleteLambdaFunction
+    action: 'aws:executeAwsApi'
+    inputs:
+      Service: lambda
+      Api: DeleteFunction
+      FunctionName: '{{ FunctionName }}'
+
+  - name: CheckSNSTopicArn
+    action: aws:branch
+    inputs:
+      Choices:
+      - NextStep: PublishSNS
+        Variable: '{{ SNSTopicArn }}'
+        StringNotEquals: ''
+      Default: SkipSNS
+
+  - name: PublishSNS
+    action: aws:executeAwsApi
+    inputs:
+      Service: sns
+      Api: Publish
+      TopicArn: '{{ SNSTopicArn }}'
+      Message: 'Lambda function {{ FunctionName }} was deleted because it was not associated with a VPC.'
+    isEnd: true
+
+  - name: SkipSNS
+    action: aws:executeScript
+    inputs:
+      Runtime: python3.11
+      Handler: script_handler
+      Script: |
+        def script_handler(events, context):
+          print("SNSTopicArn is empty, skipping SNS publication")
+    isEnd: true

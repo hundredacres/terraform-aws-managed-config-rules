@@ -1,0 +1,49 @@
+schemaVersion: '0.3'
+description: 'Enable S3 bucket public access block'
+parameters:
+  BucketName:
+    type: String
+    description: 'The name of the S3 bucket'
+  SNSTopicArn:
+    type: String
+    description: 'ARN of the SNS Topic'
+    default: ''
+mainSteps:
+  - name: EnablePublicAccessBlock
+    action: 'aws:executeAwsApi'
+    inputs:
+      Service: s3
+      Api: PutPublicAccessBlock
+      BucketName: '{{ BucketName }}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+  - name: CheckSNSTopicArn
+    action: aws:branch
+    inputs:
+      Choices:
+      - NextStep: PublishSNS
+        Variable: '{{ SNSTopicArn }}'
+        StringNotEquals: ''
+      Default: SkipSNS
+
+  - name: PublishSNS
+    action: aws:executeAwsApi
+    inputs:
+      Service: sns
+      Api: Publish
+      TopicArn: '{{ SNSTopicArn }}'
+      Message: 'Public Access Block has been enabled for S3 bucket: {{ BucketName }}'
+    isEnd: true
+
+  - name: SkipSNS
+    action: aws:executeScript
+    inputs:
+      Runtime: python3.11
+      Handler: script_handler
+      Script: |
+        def script_handler(events, context):
+          print("SNSTopicArn is empty, skipping SNS publication")
+    isEnd: true

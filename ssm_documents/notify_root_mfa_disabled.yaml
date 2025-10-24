@@ -1,0 +1,42 @@
+---
+schemaVersion: '0.3'
+description: 'Send notification that root account MFA is not enabled (cannot be auto-remediated)'
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: 'The ARN of the role that allows Automation to perform the actions'
+    default: ''
+mainSteps:
+%{ if SNSTopicArn != "" ~}
+  - name: SendNotification
+    action: 'aws:executeAwsApi'
+    description: 'Send SNS notification about root account MFA not being enabled'
+    inputs:
+      Service: sns
+      Api: Publish
+      TopicArn: '${SNSTopicArn}'
+      Subject: 'CRITICAL: Root Account MFA Not Enabled'
+      Message: |
+        CRITICAL SECURITY ALERT
+
+        The root account for this AWS account does not have MFA enabled.
+
+        This is a high-severity security risk. The root account has unrestricted access to all resources in your AWS account.
+
+        ACTION REQUIRED:
+        1. Sign in to the AWS Management Console as the root user
+        2. Navigate to IAM > Dashboard
+        3. Under Security Status, expand "Activate MFA on your root account"
+        4. Follow the steps to enable MFA using a virtual or hardware MFA device
+
+        This issue cannot be automatically remediated and requires manual intervention.
+
+        Time of detection: {{ global:DATE_TIME }}
+%{ else ~}
+  - name: NoSNSConfigured
+    action: 'aws:sleep'
+    description: 'No SNS topic configured - cannot send notification'
+    inputs:
+      Duration: PT1S
+%{ endif ~}

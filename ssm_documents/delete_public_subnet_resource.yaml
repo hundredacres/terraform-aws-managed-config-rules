@@ -1,0 +1,85 @@
+schemaVersion: '0.3'
+description: 'Delete resource created in public subnet (except load balancers)'
+parameters:
+  ResourceId:
+    type: String
+    description: 'The ID of the resource to delete'
+  ResourceType:
+    type: String
+    description: 'The type of the resource to delete'
+  SNSTopicArn:
+    type: String
+    description: 'ARN of the SNS Topic'
+    default: ''
+mainSteps:
+  - name: CheckResourceType
+    action: 'aws:branch'
+    inputs:
+      Choices:
+        - NextStep: DeleteEC2Instance
+          Variable: '{{ ResourceType }}'
+          StringEquals: 'AWS::EC2::Instance'
+        - NextStep: DeleteRDSInstance
+          Variable: '{{ ResourceType }}'
+          StringEquals: 'AWS::RDS::DBInstance'
+        - NextStep: StopECSTask
+          Variable: '{{ ResourceType }}'
+          StringEquals: 'AWS::ECS::Task'
+      Default: SkipDeletion
+  - name: DeleteEC2Instance
+    action: 'aws:executeAwsApi'
+    inputs:
+      Service: ec2
+      Api: TerminateInstances
+      InstanceIds:
+        - '{{ ResourceId }}'
+  - name: DeleteRDSInstance
+    action: 'aws:executeAwsApi'
+    inputs:
+      Service: rds
+      Api: DeleteDBInstance
+      DBInstanceIdentifier: '{{ ResourceId }}'
+      SkipFinalSnapshot: true
+  - name: StopECSTask
+    action: 'aws:executeAwsApi'
+    inputs:
+      Service: ecs
+      Api: StopTask
+      Task: '{{ ResourceId }}'
+      Reason: 'Task running in public subnet'
+  - name: SkipDeletion
+    action: 'aws:executeScript'
+    inputs:
+      Runtime: python3.11
+      Handler: script_handler
+      Script: |
+        def script_handler(events, context):
+          print(f"Skipping deletion for resource type: {events['ResourceType']}")
+          return {'SkippedResourceType': events['ResourceType']}
+  - name: CheckSNSTopicArn
+    action: aws:branch
+    inputs:
+      Choices:
+      - NextStep: PublishSNS
+        Variable: '{{ SNSTopicArn }}'
+        StringNotEquals: ''
+      Default: SkipSNS
+
+  - name: PublishSNS
+    action: aws:executeAwsApi
+    inputs:
+      Service: sns
+      Api: Publish
+      TopicArn: '{{ SNSTopicArn }}'
+      Message: 'Resource {{ ResourceId }} of type {{ ResourceType }} in public subnet has been addressed.'
+    isEnd: true
+
+  - name: SkipSNS
+    action: aws:executeScript
+    inputs:
+      Runtime: python3.11
+      Handler: script_handler
+      Script: |
+        def script_handler(events, context):
+          print("SNSTopicArn is empty, skipping SNS publication")
+    isEnd: true

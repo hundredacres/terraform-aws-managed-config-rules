@@ -1,0 +1,109 @@
+---
+schemaVersion: '0.3'
+description: 'Enable VPC Flow Logs for a VPC that does not have them enabled'
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: 'The ARN of the role that allows Automation to perform the actions'
+    default: ''
+  VpcId:
+    type: String
+    description: 'The VPC ID to enable flow logs for'
+mainSteps:
+  - name: CheckExistingFlowLogs
+    action: 'aws:executeScript'
+    description: 'Check if VPC already has flow logs enabled'
+    inputs:
+      Runtime: python3.11
+      Handler: check_flow_logs
+      Script: |
+        import boto3
+
+        def check_flow_logs(events, context):
+            ec2 = boto3.client('ec2')
+            vpc_id = events['VpcId']
+
+            response = ec2.describe_flow_logs(
+                Filters=[
+                    {
+                        'Name': 'resource-id',
+                        'Values': [vpc_id]
+                    }
+                ]
+            )
+
+            flow_logs = response.get('FlowLogs', [])
+            has_flow_logs = len(flow_logs) > 0
+
+            return {
+                'HasFlowLogs': has_flow_logs,
+                'FlowLogCount': len(flow_logs)
+            }
+      InputPayload:
+        VpcId: '{{ VpcId }}'
+    outputs:
+      - Name: HasFlowLogs
+        Selector: $.Payload.HasFlowLogs
+        Type: Boolean
+      - Name: FlowLogCount
+        Selector: $.Payload.FlowLogCount
+        Type: Integer
+  - name: CheckIfFlowLogsExist
+    action: 'aws:branch'
+    description: 'Branch based on whether flow logs already exist'
+    inputs:
+      Choices:
+        - NextStep: SkipCreation
+          Variable: '{{ CheckExistingFlowLogs.HasFlowLogs }}'
+          BooleanEquals: true
+      Default: CreateLogGroup
+  - name: CreateLogGroup
+    action: 'aws:executeAwsApi'
+    description: 'Create CloudWatch Log Group for VPC Flow Logs'
+    onFailure: Continue
+    inputs:
+      Service: logs
+      Api: CreateLogGroup
+      logGroupName: '${LogGroupNamePrefix}{{ VpcId }}'
+    outputs:
+      - Name: LogGroupName
+        Selector: $.logGroupName
+        Type: String
+  - name: EnableFlowLogs
+    action: 'aws:executeAwsApi'
+    description: 'Enable VPC Flow Logs'
+    inputs:
+      Service: ec2
+      Api: CreateFlowLogs
+      ResourceIds:
+        - '{{ VpcId }}'
+      ResourceType: VPC
+      TrafficType: '${TrafficType}'
+      LogDestinationType: cloud-watch-logs
+      LogGroupName: '${LogGroupNamePrefix}{{ VpcId }}'
+      DeliverLogsPermissionArn: '${FlowLogsRoleArn}'
+    outputs:
+      - Name: FlowLogIds
+        Selector: $.FlowLogIds
+        Type: StringList
+      - Name: Unsuccessful
+        Selector: $.Unsuccessful
+        Type: MapList
+%{ if SNSTopicArn != "" ~}
+  - name: SendNotification
+    action: 'aws:executeAwsApi'
+    description: 'Send SNS notification about VPC Flow Logs enablement'
+    inputs:
+      Service: sns
+      Api: Publish
+      TopicArn: '${SNSTopicArn}'
+      Subject: 'VPC Flow Logs Enabled'
+      Message: 'VPC Flow Logs have been enabled for VPC {{ VpcId }}. Log Group: ${LogGroupNamePrefix}{{ VpcId }}. Flow Log IDs: {{ EnableFlowLogs.FlowLogIds }}'
+    isEnd: true
+%{ endif ~}
+  - name: SkipCreation
+    action: 'aws:sleep'
+    description: 'Flow logs already exist, no action needed'
+    inputs:
+      Duration: PT1S

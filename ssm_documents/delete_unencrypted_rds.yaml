@@ -1,0 +1,66 @@
+---
+schemaVersion: '0.3'
+description: 'Delete RDS DB Instance without encryption enabled'
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: 'The ARN of the role that allows Automation to perform the actions'
+    default: ''
+  DBInstanceIdentifier:
+    type: String
+    description: 'The RDS DB Instance identifier'
+mainSteps:
+  - name: DescribeDBInstance
+    action: 'aws:executeAwsApi'
+    description: 'Get details about the RDS instance'
+    inputs:
+      Service: rds
+      Api: DescribeDBInstances
+      DBInstanceIdentifier: '{{ DBInstanceIdentifier }}'
+    outputs:
+      - Name: StorageEncrypted
+        Selector: $.DBInstances[0].StorageEncrypted
+        Type: Boolean
+      - Name: DBInstanceArn
+        Selector: $.DBInstances[0].DBInstanceArn
+        Type: String
+  - name: CheckEncryption
+    action: 'aws:branch'
+    description: 'Check if RDS instance is encrypted'
+    inputs:
+      Choices:
+        - NextStep: SkipDeletion
+          Variable: '{{ DescribeDBInstance.StorageEncrypted }}'
+          BooleanEquals: true
+      Default: DeleteDBInstance
+  - name: DeleteDBInstance
+    action: 'aws:executeAwsApi'
+    description: 'Delete the unencrypted RDS DB instance'
+    inputs:
+      Service: rds
+      Api: DeleteDBInstance
+      DBInstanceIdentifier: '{{ DBInstanceIdentifier }}'
+      SkipFinalSnapshot: true
+      DeleteAutomatedBackups: true
+    outputs:
+      - Name: Response
+        Selector: $
+        Type: StringMap
+%{ if SNSTopicArn != "" ~}
+  - name: SendNotification
+    action: 'aws:executeAwsApi'
+    description: 'Send SNS notification about RDS deletion'
+    inputs:
+      Service: sns
+      Api: Publish
+      TopicArn: '${SNSTopicArn}'
+      Subject: 'Unencrypted RDS Instance Deleted'
+      Message: 'RDS DB Instance {{ DBInstanceIdentifier }} was deleted because it did not have encryption enabled. ARN: {{ DescribeDBInstance.DBInstanceArn }}'
+    isEnd: true
+%{ endif ~}
+  - name: SkipDeletion
+    action: 'aws:sleep'
+    description: 'Instance is encrypted, no action needed'
+    inputs:
+      Duration: PT1S

@@ -1,0 +1,149 @@
+---
+schemaVersion: '0.3'
+description: 'Remediate S3 bucket with public read or write access by removing public access'
+assumeRole: '{{ AutomationAssumeRole }}'
+parameters:
+  AutomationAssumeRole:
+    type: String
+    description: 'The ARN of the role that allows Automation to perform the actions'
+    default: ''
+  BucketName:
+    type: String
+    description: 'The name of the S3 bucket with public access'
+mainSteps:
+  - name: GetBucketAcl
+    action: 'aws:executeAwsApi'
+    description: 'Get the current bucket ACL'
+    inputs:
+      Service: s3
+      Api: GetBucketAcl
+      Bucket: '{{ BucketName }}'
+    outputs:
+      - Name: Grants
+        Selector: $.Grants
+        Type: MapList
+  - name: RemovePublicAclGrants
+    action: 'aws:executeScript'
+    description: 'Remove public ACL grants if present'
+    inputs:
+      Runtime: python3.11
+      Handler: remove_public_grants
+      Script: |
+        import boto3
+
+        def remove_public_grants(events, context):
+            s3 = boto3.client('s3')
+            bucket_name = events['BucketName']
+            grants = events['Grants']
+
+            # Check if there are any public grants
+            public_uris = [
+                'http://acs.amazonaws.com/groups/global/AllUsers',
+                'http://acs.amazonaws.com/groups/global/AuthenticatedUsers'
+            ]
+
+            has_public_grants = False
+            for grant in grants:
+                grantee = grant.get('Grantee', {})
+                if grantee.get('Type') == 'Group' and grantee.get('URI') in public_uris:
+                    has_public_grants = True
+                    break
+
+            if has_public_grants:
+                # Set private ACL
+                s3.put_bucket_acl(Bucket=bucket_name, ACL='private')
+                return {'AclUpdated': True, 'Message': 'Public ACL grants removed'}
+            else:
+                return {'AclUpdated': False, 'Message': 'No public ACL grants found'}
+      InputPayload:
+        BucketName: '{{ BucketName }}'
+        Grants: '{{ GetBucketAcl.Grants }}'
+    outputs:
+      - Name: AclUpdated
+        Selector: $.Payload.AclUpdated
+        Type: Boolean
+      - Name: Message
+        Selector: $.Payload.Message
+        Type: String
+  - name: GetBucketPolicy
+    action: 'aws:executeScript'
+    description: 'Get and check bucket policy for public access'
+    inputs:
+      Runtime: python3.11
+      Handler: check_bucket_policy
+      Script: |
+        import boto3
+        import json
+
+        def check_bucket_policy(events, context):
+            s3 = boto3.client('s3')
+            bucket_name = events['BucketName']
+
+            try:
+                response = s3.get_bucket_policy(Bucket=bucket_name)
+                policy = json.loads(response['Policy'])
+
+                # Check for public access in policy
+                has_public_policy = False
+                for statement in policy.get('Statement', []):
+                    principal = statement.get('Principal', {})
+                    if principal == '*' or (isinstance(principal, dict) and principal.get('AWS') == '*'):
+                        has_public_policy = True
+                        break
+
+                return {
+                    'HasPolicy': True,
+                    'HasPublicPolicy': has_public_policy,
+                    'Policy': response['Policy']
+                }
+            except s3.exceptions.NoSuchBucketPolicy:
+                return {
+                    'HasPolicy': False,
+                    'HasPublicPolicy': False,
+                    'Policy': ''
+                }
+      InputPayload:
+        BucketName: '{{ BucketName }}'
+    outputs:
+      - Name: HasPublicPolicy
+        Selector: $.Payload.HasPublicPolicy
+        Type: Boolean
+  - name: RemovePublicBucketPolicy
+    action: 'aws:branch'
+    description: 'Remove public bucket policy if present'
+    inputs:
+      Choices:
+        - NextStep: DeleteBucketPolicy
+          Variable: '{{ GetBucketPolicy.HasPublicPolicy }}'
+          BooleanEquals: true
+      Default: EnablePublicAccessBlock
+  - name: DeleteBucketPolicy
+    action: 'aws:executeAwsApi'
+    description: 'Delete the bucket policy with public access'
+    inputs:
+      Service: s3
+      Api: DeleteBucketPolicy
+      Bucket: '{{ BucketName }}'
+  - name: EnablePublicAccessBlock
+    action: 'aws:executeAwsApi'
+    description: 'Enable S3 bucket public access block'
+    inputs:
+      Service: s3
+      Api: PutBucketPublicAccessBlock
+      Bucket: '{{ BucketName }}'
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: true
+        IgnorePublicAcls: true
+        BlockPublicPolicy: true
+        RestrictPublicBuckets: true
+%{ if SNSTopicArn != "" ~}
+  - name: SendNotification
+    action: 'aws:executeAwsApi'
+    description: 'Send SNS notification about S3 public access remediation'
+    inputs:
+      Service: sns
+      Api: Publish
+      TopicArn: '${SNSTopicArn}'
+      Subject: 'S3 Bucket Public Access Remediated'
+      Message: 'Public access has been removed from S3 bucket {{ BucketName }}. ACL updated: {{ RemovePublicAclGrants.AclUpdated }}. Public access block has been enabled.'
+%{ endif ~}

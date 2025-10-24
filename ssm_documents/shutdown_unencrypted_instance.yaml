@@ -1,0 +1,45 @@
+schemaVersion: '2.2'
+description: 'Shut down EC2 instance with unencrypted root volume'
+parameters:
+  InstanceId:
+    type: String
+    description: 'The ID of the EC2 instance to shut down'
+  SNSTopicArn:
+    type: String
+    description: 'ARN of the SNS Topic'
+    default: ''
+mainSteps:
+  - name: ShutdownInstance
+    action: 'aws:executeAwsApi'
+    inputs:
+      Service: ec2
+      Api: StopInstances
+      InstanceIds:
+        - '{{ InstanceId }}'
+  - name: CheckSNSTopicArn
+    action: aws:branch
+    inputs:
+      Choices:
+      - NextStep: PublishSNS
+        Variable: '{{ SNSTopicArn }}'
+        StringNotEquals: ''
+      Default: SkipSNS
+
+  - name: PublishSNS
+    action: aws:executeAwsApi
+    inputs:
+      Service: sns
+      Api: Publish
+      TopicArn: '{{ SNSTopicArn }}'
+      Message: 'EC2 instance {{ InstanceId }} was shut down due to unencrypted root volume.'
+    isEnd: true
+
+  - name: SkipSNS
+    action: aws:executeScript
+    inputs:
+      Runtime: python3.11
+      Handler: script_handler
+      Script: |
+        def script_handler(events, context):
+          print("SNSTopicArn is empty, skipping SNS publication")
+    isEnd: true
