@@ -9,7 +9,7 @@ locals {
       maximum_automatic_attempts = 3
       parameters = {
         AutomationAssumeRole = {
-          static_value = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ConfigRemediationRole"
+          static_value = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/AWSConfigRole"
         }
         VpcId = {
           resource_value = "RESOURCE_ID"
