@@ -7,6 +7,14 @@ locals {
       target_type                = "SSM_DOCUMENT"
       automatic                  = true
       maximum_automatic_attempts = 3
+      parameters = {
+        AutomationAssumeRole = {
+          static_value = "arn:aws:iam::${data.aws_caller_identity.current.account_id}:role/ConfigRemediationRole"
+        }
+        VpcId = {
+          resource_value = "RESOURCE_ID"
+        }
+      }
     }
   }
 }
