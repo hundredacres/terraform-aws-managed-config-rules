@@ -57,7 +57,7 @@ resource "aws_config_remediation_configuration" "this" {
     k => v if contains(keys(var.rules), v.rule_name)
   }
 
-  config_rule_name = "${var.rule_name_prefix}${each.value.rule_name}"
+  config_rule_name = "${each.value.rule_name}"
   target_type      = each.value.target_type
   target_id        = each.value.target_id
   target_version   = each.value.target_version
