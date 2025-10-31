@@ -5,6 +5,7 @@ module "org" {
   rules             = local.rules_to_apply
   rule_name_prefix  = var.rule_name_prefix
   excluded_accounts = var.excluded_accounts
+  remediation_configurations = local.remediation_configurations
 }
 
 module "account" {
