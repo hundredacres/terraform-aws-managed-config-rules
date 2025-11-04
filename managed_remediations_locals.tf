@@ -20,7 +20,7 @@ locals {
         LogDestinationType = {
           static_value = "cloud-watch-logs"
         }
-        VpcId = {
+        ResourceIds = {
           resource_value = "RESOURCE_ID"
         }
       }
