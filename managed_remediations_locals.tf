@@ -17,7 +17,7 @@ locals {
         TrafficType = {
           static_value = "REJECT"
         }
-        DestinationType = {
+        LogDestinationType = {
           static_value = "cloud-watch-logs"
         }
         VpcId = {
