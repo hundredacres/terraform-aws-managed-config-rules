@@ -11,7 +11,7 @@ locals {
         AutomationAssumeRole = {
           static_value = var.assumable_role
         }
-        LogGroupName = {
+        LogGroupNamePrefix = {
           static_value = "/aws/vpc/flow-logs"
         }
         TrafficType = {
