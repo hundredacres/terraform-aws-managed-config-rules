@@ -11,14 +11,14 @@ locals {
         AutomationAssumeRole = {
           static_value = var.assumable_role
         }
-        LogGroupNamePrefix = {
+        LogGroupName = {
           static_value = "/aws/vpc/flow-logs"
         }
         TrafficType = {
           static_value = "REJECT"
         }
         DestinationType = {
-          static_value = "CloudWatchLogs"
+          static_value = "cloud-watch-logs"
         }
         VpcId = {
           resource_value = "RESOURCE_ID"
