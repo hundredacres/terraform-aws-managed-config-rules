@@ -60,11 +60,11 @@ resource "aws_config_remediation_configuration" "this" {
   config_rule_name = each.value.rule_name
   target_type      = each.value.target_type
   target_id        = each.value.target_id
-  target_version   = each.value.target_version != null ? each.value.target_version : null
+  target_version   = each.value.target_version
   resource_type    = each.value.resource_type
 
   maximum_automatic_attempts = each.value.maximum_automatic_attempts
-  retry_attempt_seconds      = each.value.retry_attempt_seconds != null ? each.value.retry_attempt_seconds : null
+  retry_attempt_seconds      = each.value.retry_attempt_seconds
   automatic                  = each.value.automatic
 
   dynamic "execution_controls" {
