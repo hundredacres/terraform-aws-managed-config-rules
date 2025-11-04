@@ -11,6 +11,15 @@ locals {
         AutomationAssumeRole = {
           static_value = var.assumable_role
         }
+        LogGroupName = {
+          static_value = "/aws/vpc/flow-logs"
+        }
+        TrafficType = {
+          static_value = "REJECT"
+        }
+        DestinationType = {
+          static_value = "CloudWatchLogs"
+        }
         VpcId = {
           resource_value = "RESOURCE_ID"
         }
